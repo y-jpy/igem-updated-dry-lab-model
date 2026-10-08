@@ -119,11 +119,17 @@ def test_front_speed():
 
 
 # ----------------------------------------------------------------------
-# T5: front failure reproduced (chronic baseline never closes)
+# T5: chronic stall reproduced via the inflammation term, AND the same
+# rates without inflammation heal (model discriminates normal vs chronic)
 # ----------------------------------------------------------------------
 def test_front_failure():
-    t, r_f, A_c, tc = C6.solve_closure(R_w=0.2, t_end_d=60)
-    check("T5 chronic front stall (tc=inf)", np.isinf(tc), f"tc={tc}")
+    Ie_unt = float(M.theta_LPS(0.0, P.uM_to_mol_per_cm3(1.0)))
+    t, r_f, A_c, tc = C6.solve_closure(R_w=0.2, t_end_d=60,
+                                        Ie_of_t=lambda tt: Ie_unt)
+    t2, r_f2, _, tc2 = C6.solve_closure(R_w=0.2, t_end_d=60)
+    check("T5 chronic stall (Ie=0.94) / normal heals",
+          np.isinf(tc) and np.isfinite(tc2),
+          f"chronic tc={tc}, normal tc={tc2:.1f} d")
 
 
 if __name__ == "__main__":
