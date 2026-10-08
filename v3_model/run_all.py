@@ -2,16 +2,18 @@
 run_all.py — end-to-end V3 model run. Reads ONLY params.py; edit params and
 rerun this file to regenerate every figure and table.
 
-Outputs (written to /workspace/v3_run, then copied to /mnt/results/v3_results):
+Outputs (written to ./v3_results relative to the working directory):
   figures/  fig1_release.png        Model 1 cumulative release f(t), both species
             fig2_tissue.png         Model 2 tissue concentrations vs time
             fig3_no_nitrite.png     Model 5 NO / cumulative nitrite trajectories
             fig4_closure.png        Model 6 front trajectories and pulse table
             fig5_scaled_arm.png     Models 3-4 scaled dose-response
+            fig6_frequency.png      healing time vs dressing-change interval
   tables/   table_release_check.csv doc-baseline 95% release validation
             table_closure_pulse.csv minimum pulse vs wound radius
             table_loading.csv       Model 7 loading bound + days above target
             table_no_check.csv      NO baseline calibration
+            table_frequency.csv     reapplication frequency sweep
             summary.json            headline numbers
 """
 
@@ -33,7 +35,7 @@ import closure as C6
 matplotlib.rcParams["font.family"] = ["Liberation Sans", "DejaVu Sans"]
 matplotlib.rcParams["svg.fonttype"] = "none"
 
-OUT = "/workspace/v3_run"
+OUT = os.path.abspath("v3_results")
 FIG = os.path.join(OUT, "figures")
 TAB = os.path.join(OUT, "tables")
 os.makedirs(FIG, exist_ok=True)
@@ -157,6 +159,10 @@ with open(os.path.join(TAB, "table_loading.csv"), "w") as fh:
         fh.write(f"{d_um},{b:.0f}\n")
 summary["days_above_25uM"] = [
     {"loading_uM": r[0], "days": r[1], "peak_uM": r[2]} for r in above_rows]
+# single-patch effect window in hours (the reservoir drains through the
+# dermal sink in hours — structural, not a parameter artifact); daily
+# dressing changes repeat this window every reapply_interval
+summary["hours_above_25uM_per_patch"] = round(above_rows[-1][1] * 24, 1)
 summary["loading_bound_uM"] = {
     str(d): round(C6.loading_bound(delta=d * 1e-4))
     for d in (300, 500, 1000)}
@@ -225,12 +231,34 @@ t_t, NO_t, NO2_t = M.nitrite_trajectory(cv, t_s, KD_P_scen)
 supp = 1 - NO2_t[-1] / NO2_u[-1] if NO2_u[-1] > 0 else np.nan
 summary["nitrite_suppression_14d"] = round(float(supp), 3)
 
+# 24-h suppression (single patch) — the patch's acute effect window
+j24 = np.searchsorted(t_s, 86400.0)
+supp_24 = 1 - NO2_t[j24] / NO2_u[j24] if NO2_u[j24] > 0 else np.nan
+summary["nitrite_suppression_24h_single"] = round(float(supp_24), 3)
+
+# Daily dressing-change protocol (standard clinical practice): the PDE is
+# linear in C0, so superposition is exact; each patch restarts the same
+# band-concentration profile (the single-patch profile has decayed to ~0
+# well before the 1-d change interval). NOTE: t is in seconds here, so the
+# modulus must be in seconds too.
+T_re_s = P.design["reapply_interval_d"] * 86400.0
+cv_re = lambda tt: cV_band_of_t(np.mod(tt, T_re_s), C0_load)
+t_r, NO_r, NO2_r = M.nitrite_trajectory(cv_re, t_s, KD_P_scen)
+supp_re = 1 - NO2_r[-1] / NO2_u[-1] if NO2_u[-1] > 0 else np.nan
+summary["nitrite_suppression_14d_reapply_daily"] = round(float(supp_re), 3)
+
 fig, axes = plt.subplots(1, 2, figsize=(7.4, 3.2))
-axes[0].semilogx(t_days[1:], M.nM(cv(t_s))[1:], color="#0279EE")
+axes[0].semilogx(t_days[1:], M.nM(cv(t_s))[1:], color="#0279EE",
+                 label="single patch")
+axes[0].semilogx(t_days[1:], M.nM(cv_re(t_s))[1:], color="#75A025",
+                 ls="--", label="daily reapplication")
 axes[0].set_xlabel("time (d)")
 axes[0].set_ylabel("V14 at band (nM)")
+axes[0].legend(frameon=False, fontsize=8)
 axes[1].semilogx(t_days[1:], NO_u[1:], color="grey", label="untreated")
-axes[1].semilogx(t_days[1:], NO_t[1:], color="#0279EE", label="treated")
+axes[1].semilogx(t_days[1:], NO_t[1:], color="#0279EE", label="single patch")
+axes[1].semilogx(t_days[1:], NO_r[1:], color="#75A025", ls="--",
+                 label="daily reapplication")
 axes[1].set_xlabel("time (d)")
 axes[1].set_ylabel("free NO (nM, p65-driven)")
 axes[1].legend(frameon=False, fontsize=8)
@@ -247,18 +275,27 @@ with open(os.path.join(TAB, "table_no_check.csv"), "w") as fh:
 # ----------------------------------------------------------------------
 # 5. Model 6 — closure scenarios
 # ----------------------------------------------------------------------
+# Chronic baseline = inflammation-calibrated untreated state (consistent
+# with the coupled scenario): rp(Ce=0, Ie_unt) vs d(Ie_unt) ~ -0.01/d
+# (stall, not extinction — see params.py Model 6 calibration target).
+KD_P_scen = P.uM_to_mol_per_cm3(1.0)           # scenario: 1 uM (T4 knob)
+Ie_unt = float(M.theta_LPS(0.0, KD_P_scen))    # untreated theta_LPS = a/(1+a)
+rp_ch = float(C6.rp(0.0, Ie_unt))
+d_ch = float(C6.d_rate(Ie_unt))
+print(f"chronic baseline: Ie_unt={Ie_unt:.3f} rp={rp_ch:.3f} d={d_ch:.3f} "
+      f"net={rp_ch - d_ch:+.3f} /d")
+
 # (a) doc 9.4 protocol: square therapeutic pulse (rp=2.0, d=0.4) for T,
 #     then effect relaxes with a 0.5 d time constant onto the chronic base.
 def pulse_rates(Tp, rp_p=2.0, d_p=0.4, tau_rel=0.5):
-    r0, d0 = P.closure["r0_chronic"], P.closure["d0_chronic"]
     def rp_of_t(t):
         if t < Tp:
             return rp_p
-        return r0 + (rp_p - r0) * np.exp(-(t - Tp) / tau_rel)
+        return rp_ch + (rp_p - rp_ch) * np.exp(-(t - Tp) / tau_rel)
     def d_of_t(t):
         if t < Tp:
             return d_p
-        return d0 + (d_p - d0) * np.exp(-(t - Tp) / tau_rel)
+        return d_ch + (d_p - d_ch) * np.exp(-(t - Tp) / tau_rel)
     return rp_of_t, d_of_t
 
 Rw_grid = [0.1, 0.2, 0.3, 0.5]                 # 1, 2, 3, 5 mm
@@ -292,9 +329,13 @@ summary["pulse_table"] = [
     {"R_w_um": r[0], "min_pulse_d": r[1], "front_min_5d_um": r[2]}
     for r in pulse_rows]
 
-# chronic stall + representative trajectories at R_w = 2 mm
-t_ch, r_ch, _, tc_ch = C6.solve_closure(R_w=0.2, t_end_d=60, nr=600)
+# chronic stall (inflammation-sustained) + normal-wound positive control
+# + representative pulse trajectories at R_w = 2 mm
+t_ch, r_ch, _, tc_ch = C6.solve_closure(R_w=0.2, t_end_d=60, nr=600,
+                                         Ie_of_t=lambda t: Ie_unt)
 summary["chronic_stall_tc_d"] = float(tc_ch)
+t_n, r_n, _, tc_n = C6.solve_closure(R_w=0.2, t_end_d=60, nr=600)
+summary["normal_wound_tc_d"] = float(tc_n)
 
 # (b) coupled scenario demo: solubility-ceiling loading, KD_P = 1 uM scenario.
 #     Full chain: release -> band concentration -> theta_LPS -> Ie; FGF
@@ -332,15 +373,34 @@ t_cp, r_cp, _, tc_cp = C6.solve_closure(
 summary["coupled_scenario_tc_d"] = float(tc_cp)
 print(f"coupled scenario (738 uM load, KD_P=1 uM): tc={tc_cp:.2f} d")
 
+# same but with daily dressing changes: V14 at the band resets every day,
+# holding Ie lower for the whole closure window
+def Ie_of_t_re(t_d):
+    tt = np.linspace(0, max(t_d, 1e-3), 400)
+    Ii = M.theta_LPS(cv_re(tt * 86400), KD_P_scen)
+    ie = np.zeros_like(tt)
+    for i in range(1, len(tt)):
+        dt = tt[i] - tt[i - 1]
+        ie[i] = ie[i - 1] + dt * ke0_d * (Ii[i - 1] - ie[i - 1])
+    return float(np.interp(t_d, tt, ie))
+
+t_cp2, r_cp2, _, tc_cp2 = C6.solve_closure(
+    Ce_of_t=Ce_filt, Ie_of_t=Ie_of_t_re, R_w=0.2, t_end_d=60, nr=600)
+summary["coupled_scenario_tc_d_reapply_daily"] = float(tc_cp2)
+print(f"coupled scenario, daily reapplication: tc={tc_cp2:.2f} d")
+
 
 fig, axes = plt.subplots(1, 2, figsize=(7.6, 3.2))
 axes[0].plot(t_ch, r_ch * 1e4, color="grey", label="chronic untreated (stall)")
+axes[0].plot(t_n, r_n * 1e4, color="grey", ls=":", label="normal wound (no Rx)")
 for Tp, col in [(5, "#FF9400"), (12, "#75A025"), (20, "#0279EE")]:
     if Tp in traj_store:
         tt, rr = traj_store[Tp]
         axes[0].plot(tt, rr * 1e4, color=col, label=f"{Tp} d pulse")
 axes[0].plot(t_cp, r_cp * 1e4, color="#FD9BED",
              label="coupled bolus (738 uM, KD$_P$=1 uM)")
+axes[0].plot(t_cp2, r_cp2 * 1e4, color="#0279EE", ls="--",
+             label="coupled, daily reapplication")
 axes[0].set_xlabel("time (d)")
 axes[0].set_ylabel("front position r_f (um)")
 axes[0].set_xlim(0, 40)
@@ -357,12 +417,83 @@ fig.savefig(os.path.join(FIG, "fig4_closure.png"), dpi=200)
 plt.close(fig)
 
 # ----------------------------------------------------------------------
-# 6. Copy deliverables and save summary
+# 6. Reapplication-frequency sweep: how the dressing-change interval T
+#    sets chronic-wound healing time (coupled scenario, R_w = 2 mm).
+#    Each patch carries BOTH peptides; FGF Ce is already saturated for
+#    weeks from one patch, so Ce_filt is shared across intervals and the
+#    frequency dependence enters through the V14/inflammation arm.
+# ----------------------------------------------------------------------
+intervals_d = [0.25, 0.5, 1.0, 2.0, 3.0, 7.0, None]   # None = single patch
+freq_rows = []
+traj_freq = {}
+for T_d in intervals_d:
+    label = "single" if T_d is None else f"{T_d:g}"
+    if T_d is None:
+        cv_T = cv
+        dt_max = 0.25 / 20.0
+    else:
+        T_s_T = T_d * 86400.0
+        cv_T = lambda tt, Ts=T_s_T: cV_band_of_t(np.mod(tt, Ts), C0_load)
+        dt_max = min(T_d, 0.25) / 20.0
+    # Precomputed effect-compartment filter: the filter is a linear ODE
+    # with zero IC, so one long run on a grid that resolves the fastest
+    # change interval is exactly equivalent to re-integrating per call
+    # (the per-call version above cannot resolve short intervals — its
+    # 400-point grid spans the whole 60 d).
+    tt_f = np.concatenate([np.arange(0.0, 2.0, dt_max),
+                           np.linspace(2.0, 60.0, 800)[1:]])
+    Ii_f = M.theta_LPS(cv_T(tt_f * 86400), KD_P_scen)
+    ie_f = np.zeros_like(tt_f)
+    for i in range(1, len(tt_f)):
+        dt = tt_f[i] - tt_f[i - 1]
+        ie_f[i] = ie_f[i - 1] + dt * ke0_d * (Ii_f[i - 1] - ie_f[i - 1])
+    Ie_T = lambda td, tf=tt_f, ie=ie_f: float(np.interp(td, tf, ie))
+
+    t_T, r_T, _, tc_T = C6.solve_closure(
+        Ce_of_t=Ce_filt, Ie_of_t=Ie_T, R_w=0.2, t_end_d=60, nr=600)
+    _, _, NO2_T = M.nitrite_trajectory(cv_T, t_s, KD_P_scen)
+    supp_T = 1 - NO2_T[-1] / NO2_u[-1] if NO2_u[-1] > 0 else np.nan
+    freq_rows.append((label, float(tc_T), round(float(supp_T), 3)))
+    traj_freq[label] = (t_T, r_T)
+    print(f"T={label:>6s}: tc={tc_T:6.2f} d, nitrite supp(14 d)={supp_T:.3f}")
+
+summary["frequency_sweep"] = [
+    {"interval_d": r[0], "tc_d": r[1], "nitrite_supp_14d": r[2]}
+    for r in freq_rows]
+
+with open(os.path.join(TAB, "table_frequency.csv"), "w") as fh:
+    fh.write("change_interval_d,heal_time_tc_d,nitrite_suppression_14d\n")
+    for r in freq_rows:
+        fh.write(",".join(map(str, r)) + "\n")
+
+fig, axes = plt.subplots(1, 2, figsize=(7.6, 3.2))
+T_plot = [r[0] for r in freq_rows[:-1]]               # numeric intervals only
+tc_plot = [r[1] for r in freq_rows[:-1]]
+sup_plot = [r[2] for r in freq_rows[:-1]]
+axes[0].plot(T_plot, tc_plot, "o-", color="#0279EE", label="daily changes")
+axes[0].axhline(freq_rows[-1][1], color="#FD9BED", ls="--",
+                label=f"single patch ({freq_rows[-1][1]:.1f} d)")
+axes[0].axhline(summary["normal_wound_tc_d"], color="grey", ls=":",
+                label=f"normal wound ({summary['normal_wound_tc_d']:.1f} d)")
+axes[0].set_xlabel("dressing-change interval T (d)")
+axes[0].set_ylabel("healing time $t_c$ (d), $R_w$ = 2 mm")
+axes[0].set_ylim(0, 20)
+axes[0].legend(frameon=False, fontsize=8)
+axes[1].plot(T_plot, sup_plot, "o-", color="#75A025")
+axes[1].axhline(freq_rows[-1][2], color="#FD9BED", ls="--",
+                label=f"single patch ({freq_rows[-1][2]:.2f})")
+axes[1].set_xlabel("dressing-change interval T (d)")
+axes[1].set_ylabel("nitrite suppression over 14 d (fraction)")
+axes[1].legend(frameon=False, fontsize=8)
+fig.tight_layout()
+fig.savefig(os.path.join(FIG, "fig6_frequency.png"), dpi=200)
+plt.close(fig)
+
+# ----------------------------------------------------------------------
+# 7. Copy deliverables and save summary
 # ----------------------------------------------------------------------
 with open(os.path.join(OUT, "summary.json"), "w") as fh:
     json.dump(summary, fh, indent=1, default=str)
 
-dest = "/mnt/results/v3_results"
-os.system(f"rm -rf {dest} && cp -r {OUT} {dest}")
-print("DONE — outputs in /mnt/results/v3_results")
+print(f"DONE — outputs in {OUT}")
 print(json.dumps(summary, indent=1, default=str))
