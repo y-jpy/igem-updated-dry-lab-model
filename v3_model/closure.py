@@ -82,9 +82,13 @@ def solve_closure(rp_of_t=None, d_of_t=None, R_w=None, t_end_d=None, nr=800,
     n0 = K / 2 * (1 + np.tanh((r - R_w) / w))   # void inside, reservoir outside
     n0[-1] = K                                   # pin reservoir node
 
-    if nss_treated <= 0 and pulse is None and Ce_of_t is None and Ie_of_t is None:
-        # stationary chronic baseline with reff <= 0: front never advances,
-        # wound never closes (time-varying rates must still be integrated)
+    if nss_treated <= 0:
+        # rp(t) <= d(t) at ALL times -> Fisher front speed 2*sqrt(D*(rp-d))
+        # is zero/imaginary everywhere: the front can never advance, the
+        # wound never closes. (Rev 2026-10-09: previously only the
+        # stationary case short-circuited; time-varying rates with no
+        # viable steady state fell through, the population then decayed
+        # globally and the front trace tracked the pinned reservoir node.)
         t = np.linspace(0, t_end_d, 400)
         return t, R_w * np.ones_like(t), np.zeros_like(t), np.inf
 
@@ -108,9 +112,15 @@ def solve_closure(rp_of_t=None, d_of_t=None, R_w=None, t_end_d=None, nr=800,
     t, N = sol.t, sol.y
 
     r_f = np.zeros_like(t)
+    r_last = R_w                      # front starts at the wound margin
     for i in range(len(t)):
         above = np.where(N[:, i] >= thr)[0]
-        r_f[i] = r[above[0]] if len(above) else 0.0
+        if len(above):
+            r_last = r[above[0]]      # track inward advance / recession
+        # if NO cell is above threshold the population has collapsed
+        # globally; HOLD the last front position instead of reporting
+        # r_f = 0 (which the closure check would misread as healed).
+        r_f[i] = r_last
     A_c = 1 - (r_f / R_w) ** 2
     closed = np.where(r_f <= dr)[0]
     tc = t[closed[0]] if len(closed) else np.inf
