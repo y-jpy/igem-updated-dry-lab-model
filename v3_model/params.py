@@ -141,7 +141,13 @@ md2 = dict(
                           #   [Viriyakosol 2000, J Endotoxin Res 6:131]. T3.
                           #   LPS aggregation/CD14 caveats -> order-of-magnitude.
     L_uM=1.0,             # uM, wound endotoxin load (T4 KNOB — unconstrained;
-                          #   sweep decades). a = [L]/KD_L is what enters the model.
+                          #   sweep decades). a = [L]/KD_L is what enters the
+                          #   model. NO measured wound-exudate LPS value exists
+                          #   (paucity of clinical data — Rippon 2022, J Wound
+                          #   Care 31:380, DOI 10.12968/jowc.2022.31.5.380);
+                          #   1 uM is the worst-case anchor and sets the
+                          #   untreated theta_LPS = 0.94 used to calibrate the
+                          #   closure death rates (see Model 6 calibration).
     TLR4_tot_nM=1.0,      # nM, total TLR4/MD2 (doc range 0.17-1.7 nM, T4)
 )
 
@@ -198,6 +204,17 @@ no_chain = dict(
 # ----------------------------------------------------------------------
 # 7. Model 6 — Fisher-KPP closure (all coupling constants T4 priors;
 #    NO MTT/qPCR data — scenario analysis only, never fitted)
+#
+# CALIBRATION TARGET (rev 2026-10-09): the untreated chronic wound must be
+# STALLED, not degenerating. Fisher-KPP with rp <= d has extinction as its
+# only steady state (n* = K(1 - d/rp) <= 0), so the original d0=1.0 +
+# Delta_d=0.7 drove net rates of -0.1 to -1.1 /d: the model predicted the
+# fibroblast population dies everywhere (front detection then tracks the
+# pinned reservoir node — meaningless trajectories). Real chronic wounds
+# hold viable, non-invading granulation tissue. d0 and Delta_d are set so
+#   net_untreated = rp(Ce=0, Ie=0.94) - d(Ie=0.94) = 0.497 - 0.51 ~ -0.01/d
+# (Ie=0.94 = untreated theta_LPS at [L]=1 uM). Normal-wound rates
+# (r0=0.8, d0=0.24) then heal; chronicity enters ONLY through inflammation.
 # ----------------------------------------------------------------------
 closure = dict(
     D_n=1e-9,             # cm^2/s, fibroblast motility (T4; bounded by clinical
@@ -205,14 +222,23 @@ closure = dict(
     K_cells=5e6,          # cells/cm3, confluent carrying capacity (T4)
     r0_chronic=0.8,       # 1/d, basal proliferation in chronic wound (T4;
                           #   fibroblast generation time 32-39 h in repair
-                          #   [Raff & Houck 1969] -> ~0.4-0.5/d naive; chronic lower)
-    d0_chronic=1.0,       # 1/d, chronic-baseline death rate (T4; r0<d = non-healing)
-    E_max=2.0,            # fold-maximum FGF efficacy on proliferation (T4, no MTT)
+                          #   [Raff & Houck 1969] -> ~0.4-0.5/d naive; chronic
+                          #   granulation tissue proliferative attempt higher)
+    d0_chronic=0.24,      # 1/d, basal death rate (T4; CALIBRATED — see target
+                          #   above; was 1.0, which double-counted chronicity
+                          #   on top of the inflammation term and forced
+                          #   population extinction)
+    E_max=2.0,            # fold-maximum FGF efficacy on proliferation (T4, no
+                          #   MTT; 1+E_max = 3x total, consistent with FGF2
+                          #   mitogenesis dose-response [Benington 2024,
+                          #   Pharmaceuticals 17:247; Zhu 2010, Cell Commun
+                          #   Signal 8:14 — optimum ~0.3 ng/mL, bell-shaped])
     EC50_F_ngmL=0.5,      # ng/mL, FGF2 proliferative EC50 on 3T3 (T4, no MTT;
                           #   literature FGF2 EC50 ~0.1-1 ng/mL)
     beta_r=0.5,           # inflammation penalty on proliferation (T4)
     K_I_r=0.3,            # scaled Ie threshold for proliferation penalty (T4)
-    Delta_d=0.7,          # 1/d, max inflammation-driven death increment (T4)
+    Delta_d=0.30,         # 1/d, max inflammation-driven death increment (T4;
+                          #   CALIBRATED — was 0.7, see target above)
     K_I_d=0.3,            # scaled Ie threshold for death increment (T4)
     s_I=2.0,              # Hill exponent of death response (T4)
     ke0_per_h=1.0 / 18,   # 1/h, effect-compartment rate (T4, 1/(12-24 h))
@@ -226,8 +252,13 @@ closure = dict(
 # 8. Model 7 — design / loading bound
 # ----------------------------------------------------------------------
 design = dict(
-    C_V_target_uM=25.0,   # uM, efficacious V14 concentration (flow-cytometry anchor)
+    C_V_target_uM=25.0,   # uM, efficacious V14 concentration (flow-cytometry
+                          #   anchor; consistent with competing [L]=1 uM at
+                          #   KD_P ~ 1 uM scenario)
     f_rel=0.5,            # fraction of loaded dose released (T4)
+    reapply_interval_d=1.0,  # d, dressing-change interval for the reapplication
+                          #   protocol scenario (daily changes are standard
+                          #   clinical practice for wound dressings)
 )
 
 # ----------------------------------------------------------------------
