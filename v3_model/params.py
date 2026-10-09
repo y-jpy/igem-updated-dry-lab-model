@@ -81,39 +81,25 @@ D0_F = stokes_einstein(FGF["Rh"])          # ~2.0e-6
 D0_V_doc, D0_F_doc = 3.6e-6, 1.5e-6
 
 # ----------------------------------------------------------------------
-# 2. Gel (Model 1) — sodium alginate / CaCl2, as-manufactured
-#
-# hydrogel is calcium-crosslinked sodium alginate. Alginate is a charged polysaccharide; its mesh
-# size, porosity and tortuosity differ from GelMA and depend on the
-# SA:CaCl2 ratio. Values below are a "possible" set consistent with
-# 1-2% w/v SA crosslinked with 50-200 mM CaCl2. REPLACE with your own
-# measured values when the swelling / release assay is done.
+# 2. Gel (Model 1) — 1% w/v sodium alginate, 100 mM CaCl2
+#    Measured from wet-lab protocol (2026-10).
 # ----------------------------------------------------------------------
 gel = dict(
-    L=500e-4,             # cm (500 um). Alginate gels are usually cast
-                          #   0.5-2 mm thick. A thicker gel slows release
-                          #   by L^2 (Eq. 22: tau_late = 4 L^2 / pi^2 D).
-    eps=0.85,             # porosity: alginate hydrogels are highly
-                          #   hydrated. Lower than GelMA 10% baseline?
-                          #   No — alginate holds more water. 0.85 is a
-                          #   mid-range value (literature: 0.75-0.95).
-    tau=1.15,             # Bruggeman eps^-0.5 = 0.85^-0.5 = 1.085,
-                          #   rounded up for the extra tortuosity of a
-                          #   Ca-crosslinked network. Literature range
-                          #   1.05-1.30.
-    mesh_nm=8.0,          # nm, mesh size xi. Alginate mesh depends on
-                          #   SA and CaCl2 concentration:
-                          #     1% SA / 100 mM CaCl2  -> ~20 nm
-                          #     2% SA / 200 mM CaCl2  -> ~4-5 nm
-                          #   8 nm is a mid-range, moderately
-                          #   crosslinked formulation. Smaller than this
-                          #   (e.g. 5 nm) needs higher SA/CaCl2 and is
-                          #   harder to justify for a first pass.
-    a_f=0.6,              # nm, polymer chain radius. Alginate
-                          #   backbone is thicker than gelatin; 0.6 nm
-                          #   is a conservative lower bound.
+    L=500e-4,             # cm (500 um). Casting thickness; measure and replace.
+    eps=0.80,             # porosity. Literature range 65-85% for 2% alginate
+                          #   scaffolds [citation:9]; 1% alginate is higher
+                          #   porosity, so 0.80 is conservative low bound.
+    tau=1.12,             # Bruggeman eps^-0.5 = 0.80^-0.5 = 1.118, rounded.
+    mesh_nm=15.0,         # nm. 1% alginate / high Ca crosslink. Literature:
+                          #   2% alginate ~4-5 nm at high Ca; 1% is ~2x larger.
+                          #   T4 prior, replace with FRAP measurement.
+    a_f=0.6,              # nm, alginate chain radius (same as GelMA approx).
+    material="1% sodium alginate, 100 mM CaCl2",
+    SA_wv=1.0,            # % w/v
+    CaCl2_mM=100.0,       # mM
     use_doc_baseline=False,
 )
+
 if gel["use_doc_baseline"]:
     gel.update(L=500e-4, eps=0.91, tau=0.91 ** -0.5)
 
